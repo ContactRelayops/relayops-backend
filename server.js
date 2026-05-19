@@ -5,7 +5,6 @@ const stripe  = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// Allow requests from your GitHub Pages portal
 app.use(cors({
   origin: [
     'https://contactrelayops.github.io',
@@ -18,15 +17,10 @@ app.use(cors({
 
 app.use(express.json());
 
-// Health check
 app.get('/', (req, res) => {
   res.json({ status: 'RelayOps backend running', version: '1.0.0' });
 });
 
-// ── CREATE STRIPE PAYMENT LINK ──
-// POST /create-payment-link
-// Body: { amount, jobType, address, jobId, customerEmail }
-// Returns: { url }
 app.post('/create-payment-link', async (req, res) => {
   try {
     const { amount, jobType, address, jobId, customerEmail } = req.body;
@@ -37,20 +31,16 @@ app.post('/create-payment-link', async (req, res) => {
 
     const amountCents = Math.round(parseFloat(amount) * 100);
     const productName = `${jobType || 'Property Maintenance'} — ${(address || '').split(',')[0]}`;
-    const description = `RelayOps job coordination · Job ID: ${jobId || 'N/A'}`;
 
-    // Create a Price object (required for Payment Links)
     const price = await stripe.prices.create({
       currency: 'usd',
       unit_amount: amountCents,
       product_data: {
         name: productName,
-        description: description,
         metadata: { jobId: jobId || '', relayops: 'true' }
       }
     });
 
-    // Create Payment Link
     const paymentLink = await stripe.paymentLinks.create({
       line_items: [{ price: price.id, quantity: 1 }],
       after_completion: {
@@ -63,12 +53,7 @@ app.post('/create-payment-link', async (req, res) => {
         jobId: jobId || '',
         customerEmail: customerEmail || '',
         relayops: 'true'
-      },
-      // Pre-fill customer email if provided
-      ...(customerEmail ? {
-        customer_creation: 'always',
-        billing_address_collection: 'auto'
-      } : {})
+      }
     });
 
     console.log(`Payment link created: ${paymentLink.url} for job ${jobId}`);
@@ -80,8 +65,6 @@ app.post('/create-payment-link', async (req, res) => {
   }
 });
 
-// ── STRIPE WEBHOOK (for auto-updating job status when paid) ──
-// POST /webhook
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -92,22 +75,17 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       ? stripe.webhooks.constructEvent(req.body, sig, webhookSecret)
       : JSON.parse(req.body);
   } catch (err) {
-    console.error('Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   if (event.type === 'checkout.session.completed' ||
       event.type === 'payment_intent.succeeded') {
-
     const session  = event.data.object;
-    const metadata = session.metadata || {};
-    const jobId    = metadata.jobId;
+    const jobId    = session.metadata?.jobId;
 
     if (jobId) {
-      // Update job status in Supabase via REST
       const SUPABASE_URL = process.env.SUPABASE_URL;
       const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
-
       if (SUPABASE_URL && SUPABASE_KEY) {
         try {
           await fetch(`${SUPABASE_URL}/rest/v1/jobs?id=eq.${jobId}`, {
@@ -120,7 +98,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             },
             body: JSON.stringify({ status: 'assigned', admin_notes: 'Payment received via Stripe' })
           });
-          console.log(`Job ${jobId} updated to assigned after payment`);
         } catch (e) {
           console.error('Supabase update failed:', e.message);
         }
