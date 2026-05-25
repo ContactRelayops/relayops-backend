@@ -8,6 +8,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: [
     'https://contactrelayops.github.io',
+    'https://getrelayhq.com',
+    'https://www.getrelayhq.com',
     'http://localhost:3000',
     'http://127.0.0.1:5500'
   ],
